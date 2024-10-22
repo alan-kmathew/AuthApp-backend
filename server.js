@@ -28,13 +28,13 @@ if (!fs.existsSync(caKeyPath) || !fs.existsSync(caCertPath)) {
     value: 'Mock CA'
   }, {
     name: 'countryName',
-    value: 'US'
+    value: 'Germany'
   }, {
     shortName: 'ST',
-    value: 'California'
+    value: 'Mannheim'
   }, {
     name: 'localityName',
-    value: 'San Francisco'
+    value: 'Mannheim'
   }, {
     name: 'organizationName',
     value: 'Mock PKI'
@@ -80,19 +80,27 @@ if (!fs.existsSync(caKeyPath) || !fs.existsSync(caCertPath)) {
 app.post('/sign-csr', (req, res) => {
   try {
     const { csr } = req.body;
-    
+
     if (!csr) {
       return res.status(400).json({ error: 'CSR is required' });
     }
-    
+
     const csrObj = forge.pki.certificationRequestFromPem(csr);
     
-    // Verify the CSR
     if (!csrObj.verify()) {
       return res.status(400).json({ error: 'Invalid CSR' });
     }
     
-    // Create a new certificate
+    const serviceCardId = "SC123456";
+    const userRole = "technician";
+    const info = JSON.stringify({
+      serviceCardId,
+      userRole,
+      timestamp: new Date().toISOString()
+    });
+
+    const blobData = Buffer.from(info).toString('base64');
+
     const cert = forge.pki.createCertificate();
     cert.publicKey = csrObj.publicKey;
     cert.serialNumber = forge.util.bytesToHex(forge.random.getBytesSync(16));
@@ -102,27 +110,38 @@ app.post('/sign-csr', (req, res) => {
     
     cert.setSubject(csrObj.subject.attributes);
     cert.setIssuer(caCertificate.subject.attributes);
+
+    // Generate authorityKeyIdentifier
+    const authorityKeyId = forge.pki.getPublicKeyFingerprint(caCertificate.publicKey, { encoding: 'hex' });
+    const authorityKeyIdentifier = forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.SEQUENCE, true, [
+      forge.asn1.create(forge.asn1.Class.CONTEXT_SPECIFIC, 0, true, 
+        forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.OCTETSTRING, false, 
+          forge.util.hexToBytes(authorityKeyId)
+        )
+      )
+    ]);
+
+    // User notice and certificate policies
+    const policies = forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.SEQUENCE, true, [
+      forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.OID, false, 
+        forge.asn1.oidToDer('1.3.6.1.5.5.7.2.2').getBytes()
+      ),
+      forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.SEQUENCE, true, [
+        forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.UTF8, false, blobData)
+      ])
+    ]);
+
+    cert.setExtensions([
+      { name: 'basicConstraints', cA: false },
+      { name: 'keyUsage', digitalSignature: true, keyEncipherment: true, dataEncipherment: true },
+      { name: 'extKeyUsage', serverAuth: true, clientAuth: true },
+      { id: '2.5.29.35', critical: false, value: authorityKeyIdentifier },
+      { name: 'subjectKeyIdentifier' }, // Automatically generated
+      { id: '2.5.29.32', critical: false, value: policies }
+    ]);
     
-    cert.setExtensions([{
-      name: 'basicConstraints',
-      cA: false
-    }, {
-      name: 'keyUsage',
-      digitalSignature: true,
-      keyEncipherment: true,
-      dataEncipherment: true
-    }, {
-      name: 'extKeyUsage',
-      serverAuth: true,
-      clientAuth: true
-    }, {
-      name: 'authorityKeyIdentifier'
-    }]);
-    
-    // Sign the certificate with the CA private key
     cert.sign(caPrivateKey, forge.md.sha256.create());
     
-    // Convert the certificate to PEM format
     const certPem = forge.pki.certificateToPem(cert);
     
     res.json({ certificate: certPem });
@@ -131,6 +150,7 @@ app.post('/sign-csr', (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
