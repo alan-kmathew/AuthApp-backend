@@ -77,97 +77,27 @@ if (!fs.existsSync(caKeyPath) || !fs.existsSync(caCertPath)) {
   caCertificate = forge.pki.certificateFromPem(caCertPem);
 }
 
-//   try {
-//     const { csr } = req.body;
-//     console.log('Received CSR:', csr);
-
-//     if (!csr) {
-//       return res.status(400).json({ error: 'CSR is required' });
-//     }
-
-//     const csrObj = forge.pki.certificationRequaestFromPem(csr);
-    
-//     // Log CSR details
-//     console.log('CSR Subject:', csrObj.subject.attributes);
-//     console.log('CSR Public Key:', csrObj.publicKey);
-//     console.log('CSR Signature:', csrObj.signature);
-
-//     // Verify the CSR
-//     if (!csrObj.verify()) {
-//       return res.status(400).json({ error: 'Invalid CSR' });
-//     }
-    
-//     const serviceCardId = "SC123456";
-//     const userRole = "technician";
-//     const info = JSON.stringify({
-//       serviceCardId,
-//       userRole,
-//       timestamp: new Date().toISOString()
-//     });
-
-//     const blobData = Buffer.from(info).toString('base64');
-
-//     const cert = forge.pki.createCertificate();
-//     cert.publicKey = csrObj.publicKey;
-//     cert.serialNumber = forge.util.bytesToHex(forge.random.getBytesSync(16));
-//     cert.validity.notBefore = new Date();
-//     cert.validity.notAfter = new Date();
-//     cert.validity.notAfter.setFullYear(cert.validity.notBefore.getFullYear() + 1);
-    
-//     cert.setSubject(csrObj.subject.attributes);
-//     cert.setIssuer(caCertificate.subject.attributes);
-
-//     // Generate authorityKeyIdentifier
-//     const authorityKeyId = forge.pki.getPublicKeyFingerprint(caCertificate.publicKey, { encoding: 'hex' });
-//     const authorityKeyIdentifier = forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.SEQUENCE, true, [
-//       forge.asn1.create(forge.asn1.Class.CONTEXT_SPECIFIC, 0, true, 
-//         forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.OCTETSTRING, false, 
-//           forge.util.hexToBytes(authorityKeyId)
-//         )
-//       )
-//     ]);
-
-//     // User notice and certificate policies
-//     const policies = forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.SEQUENCE, true, [
-//       forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.OID, false, 
-//         forge.asn1.oidToDer('1.3.6.1.5.5.7.2.2').getBytes()
-//       ),
-//       forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.SEQUENCE, true, [
-//         forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.UTF8, false, "Data : " + blobData)      ])
-//     ]);
-
-//     cert.setExtensions([
-//       { name: 'basicConstraints', cA: false },
-//       { name: 'keyUsage', digitalSignature: true, keyEncipherment: true, dataEncipherment: true },
-//       { name: 'extKeyUsage', serverAuth: true, clientAuth: true },
-//       { id: '2.5.29.35', critical: false, value: authorityKeyIdentifier },
-//       { name: 'subjectKeyIdentifier' }, // Automatically generated
-//       { id: '2.5.29.32', critical: false, value: policies }
-//     ]);
-    
-//     cert.sign(caPrivateKey, forge.md.sha256.create());
-    
-//     const certPem = forge.pki.certificateToPem(cert);
-    
-//     res.json({ certificate: certPem });
-//   } catch (error) {
-//     console.error('Error signing CSR:', error);
-//     res.status(500).json({ error: 'Internal server error' });
-//   }
-// });
-
-// In your server.js, modify the /sign-csr endpoint to:
 app.post('/sign-csr', (req, res) => {
   try {
-    const { publicKey, subject } = req.body;
-    console.log('Received public key and subject:', { subject });
+    const { csr } = req.body;
+    console.log('Received CSR:', csr);
 
-    if (!publicKey) {
-      return res.status(400).json({ error: 'Public key is required' });
+    if (!csr) {
+      return res.status(400).json({ error: 'CSR is required' });
     }
 
-    // Convert PEM public key to forge public key
-    const publicKeyObj = forge.pki.publicKeyFromPem(publicKey);
+    // Corrected function name
+    const csrObj = forge.pki.certificationRequestFromPem(csr);
+    
+    // Log CSR details
+    console.log('CSR Subject:', csrObj.subject.attributes);
+    console.log('CSR Public Key:', csrObj.publicKey);
+    console.log('CSR Signature:', csrObj.signature);
+
+    // Verify the CSR
+    if (!csrObj.verify()) {
+      return res.status(400).json({ error: 'Invalid CSR' });
+    }
     
     const serviceCardId = "SC123456";
     const userRole = "technician";
@@ -179,21 +109,14 @@ app.post('/sign-csr', (req, res) => {
 
     const blobData = Buffer.from(info).toString('base64');
 
-    // Create certificate directly
     const cert = forge.pki.createCertificate();
-    cert.publicKey = publicKeyObj;
+    cert.publicKey = csrObj.publicKey;
     cert.serialNumber = forge.util.bytesToHex(forge.random.getBytesSync(16));
     cert.validity.notBefore = new Date();
     cert.validity.notAfter = new Date();
     cert.validity.notAfter.setFullYear(cert.validity.notBefore.getFullYear() + 1);
     
-    // Set subject from the request
-    const subjectAttrs = Object.entries(subject).map(([key, value]) => ({
-      name: key,
-      value: value
-    }));
-    
-    cert.setSubject(subjectAttrs);
+    cert.setSubject(csrObj.subject.attributes);
     cert.setIssuer(caCertificate.subject.attributes);
 
     // Generate authorityKeyIdentifier
@@ -212,8 +135,7 @@ app.post('/sign-csr', (req, res) => {
         forge.asn1.oidToDer('1.3.6.1.5.5.7.2.2').getBytes()
       ),
       forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.SEQUENCE, true, [
-        forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.UTF8, false, "Data : " + blobData)
-      ])
+        forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.UTF8, false, "Data : " + blobData)      ])
     ]);
 
     cert.setExtensions([
@@ -225,19 +147,16 @@ app.post('/sign-csr', (req, res) => {
       { id: '2.5.29.32', critical: false, value: policies }
     ]);
     
-    // Sign the certificate with CA private key
     cert.sign(caPrivateKey, forge.md.sha256.create());
     
     const certPem = forge.pki.certificateToPem(cert);
     
     res.json({ certificate: certPem });
   } catch (error) {
-    console.error('Error in certificate generation:', error);
+    console.error('Error signing CSR:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
-
-
 
 app.get('/ca-cert', (req, res) => {
   try {
@@ -249,7 +168,6 @@ app.get('/ca-cert', (req, res) => {
     res.status(500).json({ error: 'Failed to serve CA certificate' });
   }
 });
-
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
