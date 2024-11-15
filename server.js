@@ -51,7 +51,7 @@ extendedKeyUsage = serverAuth, clientAuth
 authorityInfoAccess = @aia
 
 [ aia ]
-caIssuers;URI = http://localhost:3000/ca.crt
+caIssuers;URI = https://authappbackend-fc21c9336969.herokuapp.com/ca.crt
 `;
     fs.writeFileSync(caConfigPath, opensslConfig);
 }
@@ -108,7 +108,7 @@ basicConstraints=CA:FALSE
 keyUsage = digitalSignature, nonRepudiation, keyEncipherment, dataEncipherment
 extendedKeyUsage = serverAuth, clientAuth
 subjectKeyIdentifier = hash
-authorityInfoAccess = caIssuers;URI:http://localhost:3000/ca.crt
+authorityInfoAccess = caIssuers;URI:https://authappbackend-fc21c9336969.herokuapp.com/ca.crt
 certificatePolicies = @policies
 
 [policies]
@@ -142,5 +142,5 @@ CPS.1 = ${info}
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`Mock PKI server running on port ${PORT}`);
-    console.log(`CA certificate available at: http://localhost:${PORT}/ca.crt`);
+    console.log(`CA certificate available at: https://authappbackend-fc21c9336969.herokuapp.com/ca.crt`);
 });
