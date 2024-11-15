@@ -10,6 +10,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "asn1.js": "^5.4.1",
     "express": "^4.21.1",
     "node-forge": "^1.3.1"
   }

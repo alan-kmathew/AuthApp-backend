@@ -1,145 +1,146 @@
 const express = require('express');
-const forge = require('node-forge');
+const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const forge = require('node-forge');
 
 const app = express();
 app.use(express.json());
 
-// Generate a self-signed CA certificate if it doesn't exist
-const caKeyPath = path.join(__dirname, 'ca_key.pem');
-const caCertPath = path.join(__dirname, 'ca_cert.pem');
+// Paths for CA files
+const caDir = path.join(__dirname, 'ca');
+const caKeyPath = path.join(caDir, 'ca.key');
+const caCertPath = path.join(caDir, 'ca.crt');
+const caConfigPath = path.join(caDir, 'openssl.cnf');
 
-let caPrivateKey, caCertificate;
-
-if (!fs.existsSync(caKeyPath) || !fs.existsSync(caCertPath)) {
-  const keys = forge.pki.rsa.generateKeyPair(2048);
-  caPrivateKey = keys.privateKey;
-  
-  const cert = forge.pki.createCertificate();
-  cert.publicKey = keys.publicKey;
-  cert.serialNumber = '01';
-  cert.validity.notBefore = new Date();
-  cert.validity.notAfter = new Date();
-  cert.validity.notAfter.setFullYear(cert.validity.notBefore.getFullYear() + 10);
-  
-  const attrs = [{
-    name: 'commonName',
-    value: 'Mock CA'
-  }, {
-    name: 'countryName',
-    value: 'Germany'
-  }, {
-    shortName: 'ST',
-    value: 'Mannheim'
-  }, {
-    name: 'localityName',
-    value: 'Mannheim'
-  }, {
-    name: 'organizationName',
-    value: 'Mock PKI'
-  }, {
-    shortName: 'OU',
-    value: 'Mock PKI'
-  }];
-  
-  cert.setSubject(attrs);
-  cert.setIssuer(attrs);
-  cert.setExtensions([{
-    name: 'basicConstraints',
-    cA: true
-  }, {
-    name: 'keyUsage',
-    keyCertSign: true,
-    digitalSignature: true,
-    nonRepudiation: true,
-    keyEncipherment: true,
-    dataEncipherment: true
-  }, {
-    name: 'extKeyUsage',
-    serverAuth: true,
-    clientAuth: true,
-    codeSigning: true,
-    emailProtection: true,
-    timeStamping: true
-  }]);
-  
-  cert.sign(caPrivateKey, forge.md.sha256.create());
-  
-  caCertificate = cert;
-  
-  fs.writeFileSync(caKeyPath, forge.pki.privateKeyToPem(caPrivateKey));
-  fs.writeFileSync(caCertPath, forge.pki.certificateToPem(caCertificate));
-} else {
-  const caKeyPem = fs.readFileSync(caKeyPath, 'utf8');
-  const caCertPem = fs.readFileSync(caCertPath, 'utf8');
-  caPrivateKey = forge.pki.privateKeyFromPem(caKeyPem);
-  caCertificate = forge.pki.certificateFromPem(caCertPem);
+// Create CA directory if it doesn't exist
+if (!fs.existsSync(caDir)) {
+    fs.mkdirSync(caDir, { recursive: true });
 }
 
-app.post('/sign-csr', (req, res) => {
-  try {
-    const { publicKey, subject } = req.body;
-    console.log('Received Public Key:', publicKey);
+// Create OpenSSL config if it doesn't exist
+if (!fs.existsSync(caConfigPath)) {
+    const opensslConfig = `
+[ req ]
+default_bits = 2048
+prompt = no
+default_md = sha256
+distinguished_name = dn
+x509_extensions = v3_ca
 
-    if (!publicKey) {
-      return res.status(400).json({ error: 'Public key is required' });
-    }
+[ dn ]
+CN = Mock CA
+C = DE
+ST = Mannheim
+L = Mannheim
+O = Mock PKI
+OU = Mock PKI
 
-    const publicKeyObj = forge.pki.publicKeyFromPem(publicKey);
+[ v3_ca ]
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid:always,issuer
+basicConstraints = critical, CA:true
+keyUsage = critical, digitalSignature, cRLSign, keyCertSign
 
-    const cert = forge.pki.createCertificate();
-    cert.publicKey = publicKeyObj;
-    cert.serialNumber = forge.util.bytesToHex(forge.random.getBytesSync(16));
-    cert.validity.notBefore = new Date();
-    cert.validity.notAfter = new Date();
-    cert.validity.notAfter.setFullYear(cert.validity.notBefore.getFullYear() + 1);
-    
-    const attrs = [{
-      name: 'commonName',
-      value: subject.commonName
-    }, {
-      name: 'organizationName',
-      value: subject.organizationName
-    }, {
-      name: 'countryName',
-      value: subject.countryName
-    }];
-    
-    cert.setSubject(attrs);
-    cert.setIssuer(caCertificate.subject.attributes);
+[ v3_end_cert ]
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid:always,issuer
+basicConstraints = critical, CA:false
+keyUsage = critical, digitalSignature, keyEncipherment
+extendedKeyUsage = serverAuth, clientAuth
+authorityInfoAccess = @aia
 
-    cert.setExtensions([
-      { name: 'basicConstraints', cA: false },
-      { name: 'keyUsage', digitalSignature: true, keyEncipherment: true, dataEncipherment: true },
-      { name: 'extKeyUsage', serverAuth: true, clientAuth: true },
-      { name: 'subjectKeyIdentifier' }, // Automatically generated
-      { name: 'authorityKeyIdentifier', keyIdentifier: true, authorityCertIssuer: true, serialNumber: true }
-    ]);
+[ aia ]
+caIssuers;URI = http://localhost:3000/ca.crt
+`;
+    fs.writeFileSync(caConfigPath, opensslConfig);
+}
+
+// Generate CA certificate if it doesn't exist
+if (!fs.existsSync(caKeyPath) || !fs.existsSync(caCertPath)) {
+    console.log('Generating new CA certificate...');
     
-    cert.sign(caPrivateKey, forge.md.sha256.create());
+    // Generate CA private key (ECDSA P-256)
+    execSync(`openssl ecparam -name prime256v1 -genkey -noout -out ${caKeyPath}`);
     
-    const certPem = forge.pki.certificateToPem(cert);
-    
-    res.json({ certificate: certPem });
-  } catch (error) {
-    console.error('Error signing public key:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+    // Generate CA certificate
+    execSync(`openssl req -x509 -new -nodes -key ${caKeyPath} -sha256 -days 3650 -out ${caCertPath} -config ${caConfigPath}`);
+}
+
+// Endpoint to download CA certificate
+app.get('/ca.crt', (req, res) => {
+    res.download(caCertPath);
 });
 
-app.get('/ca-cert', (req, res) => {
-  try {
-    const caCertPem = fs.readFileSync(caCertPath, 'utf8');
-    res.set('Content-Type', 'application/x-pem-file');
-    res.send(caCertPem);
-  } catch (error) {
-    console.error('Error serving CA certificate:', error);
-    res.status(500).json({ error: 'Failed to serve CA certificate' });
-  }
+app.post('/sign-csr', (req, res) => {
+    try {
+        const { csr } = req.body;
+        
+        if (!csr) {
+            return res.status(400).json({ error: 'CSR is required' });
+        }
+
+        // Create temporary files
+        const tmpDir = path.join(caDir, 'tmp');
+        if (!fs.existsSync(tmpDir)) {
+            fs.mkdirSync(tmpDir, { recursive: true });
+        }
+        
+        const csrPath = path.join(tmpDir, `${Date.now()}.csr`);
+        const certPath = path.join(tmpDir, `${Date.now()}.crt`);
+        const extPath = path.join(tmpDir, `${Date.now()}.ext`);
+
+        // Write CSR to file
+        fs.writeFileSync(csrPath, csr);
+
+        // Create extensions file with AIA
+        const serviceCardId = "SC123456";
+        const userRole = "technician";
+        const info = Buffer.from(JSON.stringify({
+            serviceCardId,
+            userRole,
+            timestamp: new Date().toISOString()
+        })).toString('base64');
+
+        const extensions = `
+authorityKeyIdentifier=keyid,issuer
+basicConstraints=CA:FALSE
+keyUsage = digitalSignature, nonRepudiation, keyEncipherment, dataEncipherment
+extendedKeyUsage = serverAuth, clientAuth
+subjectKeyIdentifier = hash
+authorityInfoAccess = caIssuers;URI:http://localhost:3000/ca.crt
+certificatePolicies = @policies
+
+[policies]
+policyIdentifier = 1.3.6.1.5.5.7.2.2
+CPS.1 = ${info}
+`;
+        fs.writeFileSync(extPath, extensions);
+
+        // Sign the CSR
+        execSync(`openssl x509 -req -in ${csrPath} -CA ${caCertPath} -CAkey ${caKeyPath} -CAcreateserial \
+            -out ${certPath} -days 365 -sha256 -extfile ${extPath}`);
+
+        // Read the signed certificate
+        const cert = fs.readFileSync(certPath, 'utf8');
+        
+        // Clean up temporary files
+        fs.unlinkSync(csrPath);
+        fs.unlinkSync(certPath);
+        fs.unlinkSync(extPath);
+
+        res.json({
+            certificate: cert,
+            message: "Certificate signed successfully. CA certificate can be downloaded from /ca.crt"
+        });
+    } catch (error) {
+        console.error('Error signing CSR:', error);
+        res.status(500).json({ error: 'Internal server error', details: error.message });
+    }
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Mock PKI server running on port ${PORT}`);
+    console.log(`Mock PKI server running on port ${PORT}`);
+    console.log(`CA certificate available at: http://localhost:${PORT}/ca.crt`);
 });
