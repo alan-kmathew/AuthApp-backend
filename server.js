@@ -69,7 +69,13 @@ if (!fs.existsSync(caKeyPath) || !fs.existsSync(caCertPath)) {
 
 // Endpoint to download CA certificate
 app.get('/ca.crt', (req, res) => {
-    res.download(caCertPath);
+    const caCert = fs.readFileSync(caCertPath, 'utf8');
+    const caCertBase64 = Buffer.from(caCert).toString('base64');
+    res.json({
+        certificate: caCert,
+        certificateBase64: caCertBase64,
+        message: "CA certificate"
+    });
 });
 
 app.post('/sign-csr', (req, res) => {
@@ -123,6 +129,7 @@ CPS.1 = ${info}
 
         // Read the signed certificate
         const cert = fs.readFileSync(certPath, 'utf8');
+        const certBase64 = Buffer.from(cert).toString('base64');
         
         // Clean up temporary files
         fs.unlinkSync(csrPath);
@@ -131,6 +138,7 @@ CPS.1 = ${info}
 
         res.json({
             certificate: cert,
+            certificateBase64: certBase64,
             message: "Certificate signed successfully. CA certificate can be downloaded from /ca.crt"
         });
     } catch (error) {
